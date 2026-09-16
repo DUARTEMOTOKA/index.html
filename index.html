@@ -10341,11 +10341,43 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     box-shadow:0 0 0 2000px rgba(0,0,0,0.45);
   }
   .cam-hint{
-    position:absolute; bottom:24px; left:0; right:0;
-    text-align:center; color:#fff; font-size:14px;
+    position:absolute; bottom:14px; left:0; right:0;
+    text-align:center; color:#fff; font-size:13px;
+  }
+  .scan-counter{
+    position:absolute; bottom:14px; left:14px;
+    background:rgba(0,0,0,0.55);
+    color:var(--amber);
+    font-family:'Oswald',sans-serif;
+    font-weight:600;
+    font-size:15px;
+    padding:5px 12px;
+    border-radius:20px;
+  }
+  .scan-result{
+    background:var(--bg-elev);
+    border-top:1px solid var(--line);
+    padding:18px 20px calc(14px + env(safe-area-inset-bottom, 0px));
+    text-align:center;
+    min-height:132px;
+  }
+  .scan-result-label{
+    color:var(--text-dim); font-size:13px;
+  }
+  .scan-result-num{
+    font-family:'Oswald',sans-serif;
+    font-weight:700;
+    font-size:52px;
+    color:var(--amber);
+    line-height:1.15;
+  }
+  .scan-result.notfound .scan-result-num{color:var(--coral); font-size:30px;}
+  .scan-result-addr{
+    font-size:14.5px;
+    color:var(--text);
   }
   .overlay-footer{
-    padding:16px; text-align:center;
+    padding:14px; text-align:center;
     background:#0a0c0f;
   }
   .overlay-footer button{
@@ -10357,40 +10389,6 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   .cam-error{
     color:#fff; text-align:center; padding:0 24px;
     font-size:14px; line-height:1.6;
-  }
-
-  .result{
-    position:fixed; inset:0;
-    background:var(--bg);
-    z-index:60;
-    display:none;
-    flex-direction:column;
-    align-items:center;
-    justify-content:center;
-    padding:24px;
-    text-align:center;
-  }
-  .result.show{display:flex;}
-  .result.notfound .result-num{color:var(--coral);}
-  .result-label{
-    color:var(--text-dim); font-size:14px;
-    text-transform:none; margin-bottom:4px;
-  }
-  .result-num{
-    font-family:'Oswald',sans-serif;
-    font-weight:700;
-    font-size:96px;
-    color:var(--amber);
-    line-height:1;
-  }
-  .result-addr{
-    font-size:17px; margin-top:18px;
-    max-width:320px; line-height:1.4;
-  }
-  .result-actions{
-    margin-top:36px;
-    display:flex; flex-direction:column; gap:12px;
-    width:100%; max-width:280px;
   }
 </style>
 </head>
@@ -10430,20 +10428,15 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
   <div class="cam-wrap" id="camWrap">
     <video id="video" playsinline muted autoplay></video>
     <div class="frame" id="frame"></div>
-    <div class="cam-hint">Aponte para o QR code da etiqueta</div>
+    <div class="scan-counter" id="scanCounter">0/0 bipados</div>
+  </div>
+  <div class="scan-result" id="scanResult">
+    <div class="scan-result-label" id="scanResultLabel">Aponte para o QR code da etiqueta</div>
+    <div class="scan-result-num" id="scanResultNum">--</div>
+    <div class="scan-result-addr" id="scanResultAddr"></div>
   </div>
   <div class="overlay-footer">
-    <button id="cancelScanBtn">Cancelar</button>
-  </div>
-</div>
-
-<div class="result" id="resultOverlay">
-  <div class="result-label" id="resultLabel">Pacote número</div>
-  <div class="result-num" id="resultNum">--</div>
-  <div class="result-addr" id="resultAddr"></div>
-  <div class="result-actions">
-    <button class="btn" id="scanAgainBtn">Escanear outro</button>
-    <button class="link-btn" id="closeResultBtn">Fechar</button>
+    <button id="cancelScanBtn">Fechar leitura</button>
   </div>
 </div>
 
@@ -10492,6 +10485,7 @@ fileInput.addEventListener('change', async (e) => {
     const text = await extractText(buf);
     statusEl.textContent = 'Organizando as paradas...';
     stops = parseStops(text);
+    scannedSet = new Set();
     if (stops.length === 0) {
       statusEl.classList.add('err');
       statusEl.textContent = 'Não consegui encontrar paradas nesse PDF. Confirme que é o PDF exportado do Circuit.';
@@ -10513,6 +10507,7 @@ fileInput.addEventListener('change', async (e) => {
 
 function resetApp() {
   stops = [];
+  scannedSet = new Set();
   fileInput.value = '';
   listEl.innerHTML = '';
   statsEl.style.display = 'none';
@@ -10621,24 +10616,26 @@ function escapeHtml(str) {
 /* ---------------- Leitor de QR code ---------------- */
 const scanOverlay = document.getElementById('scanOverlay');
 const camWrap = document.getElementById('camWrap');
-const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d', { willReadFrequently: true });
-const resultOverlay = document.getElementById('resultOverlay');
 let mediaStream = null;
 let scanning = false;
+let lastCode = null;
+let scannedSet = new Set();
 
 scanFab.addEventListener('click', openScanner);
 document.getElementById('cancelScanBtn').addEventListener('click', closeScanner);
-document.getElementById('closeResultBtn').addEventListener('click', closeResult);
-document.getElementById('scanAgainBtn').addEventListener('click', () => {
-  closeResult();
-  openScanner();
-});
+
+function updateCounter() {
+  const el = document.getElementById('scanCounter');
+  if (el) el.textContent = scannedSet.size + '/' + stops.length + ' bipados';
+}
 
 async function openScanner() {
   scanOverlay.classList.add('show');
-  camWrap.innerHTML = '<video id="video" playsinline muted autoplay></video><div class="frame"></div><div class="cam-hint">Aponte para o QR code da etiqueta</div>';
+  lastCode = null;
+  camWrap.innerHTML = '<video id="video" playsinline muted autoplay></video><div class="frame"></div><div class="scan-counter" id="scanCounter">' + scannedSet.size + '/' + stops.length + ' bipados</div>';
+  resetResultPanel();
   const v = document.getElementById('video');
   if (typeof jsQR === 'undefined') {
     camWrap.innerHTML = '<div class="cam-error">O leitor de QR code não carregou (sem internet neste momento?). Verifique a conexão e tente de novo.</div>';
@@ -10659,6 +10656,15 @@ async function openScanner() {
   }
 }
 
+function resetResultPanel() {
+  const panel = document.getElementById('scanResult');
+  if (!panel) return;
+  panel.classList.remove('notfound');
+  document.getElementById('scanResultLabel').textContent = 'Aponte para o QR code da etiqueta';
+  document.getElementById('scanResultNum').textContent = '--';
+  document.getElementById('scanResultAddr').textContent = '';
+}
+
 function tick() {
   if (!scanning) return;
   const v = document.getElementById('video');
@@ -10670,39 +10676,39 @@ function tick() {
     const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
     if (code && code.data) {
       handleScan(code.data.trim());
-      return;
     }
   }
   requestAnimationFrame(tick);
 }
 
 function handleScan(text) {
-  scanning = false;
-  stopStream();
-  scanOverlay.classList.remove('show');
+  if (text === lastCode) return; // mesmo pacote ainda na frente da câmera, não repete
+  lastCode = text;
   const match = stops.find(s => text.includes(s.codigo) || s.codigo.includes(text));
-  const resultNum = document.getElementById('resultNum');
-  const resultAddr = document.getElementById('resultAddr');
-  const resultLabel = document.getElementById('resultLabel');
+  const panel = document.getElementById('scanResult');
+  const labelEl = document.getElementById('scanResultLabel');
+  const numEl = document.getElementById('scanResultNum');
+  const addrEl = document.getElementById('scanResultAddr');
   if (match) {
-    resultOverlay.classList.remove('notfound');
-    resultLabel.textContent = 'Pacote número';
-    resultNum.textContent = String(match.numero).padStart(2, '0');
-    resultAddr.textContent = match.endereco;
+    panel.classList.remove('notfound');
+    labelEl.textContent = 'Pacote número';
+    numEl.textContent = String(match.numero).padStart(2, '0');
+    addrEl.textContent = match.endereco;
+    scannedSet.add(match.codigo);
+    updateCounter();
+    updateStats();
     highlightRow(match.numero - 1);
   } else {
-    resultOverlay.classList.add('notfound');
-    resultLabel.textContent = 'Código lido';
-    resultNum.textContent = '?';
-    resultAddr.textContent = 'Não encontrei esse código na rota importada: "' + text + '"';
+    panel.classList.add('notfound');
+    labelEl.textContent = 'Código lido (não encontrado na rota)';
+    numEl.textContent = '?';
+    addrEl.textContent = text;
   }
-  resultOverlay.classList.add('show');
 }
 
 function highlightRow(idx) {
   const row = document.getElementById('row-' + idx);
   if (row) {
-    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
     row.classList.add('highlight');
     setTimeout(() => row.classList.remove('highlight'), 2500);
   }
@@ -10712,10 +10718,6 @@ function closeScanner() {
   scanning = false;
   stopStream();
   scanOverlay.classList.remove('show');
-}
-
-function closeResult() {
-  resultOverlay.classList.remove('show');
 }
 
 function stopStream() {
