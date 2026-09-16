@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -10140,6 +10141,24 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     border-bottom:1px solid var(--line);
     padding:18px 0 14px;
   }
+  .header-top{
+    display:flex;
+    align-items:center;
+    gap:12px;
+  }
+  .back-btn{
+    background:var(--bg-elev);
+    border:1px solid var(--line);
+    color:var(--text);
+    width:36px; height:36px;
+    border-radius:50%;
+    font-size:18px;
+    line-height:1;
+    cursor:pointer;
+    flex-shrink:0;
+    padding:0;
+  }
+  .back-btn:active{background:var(--line);}
   .brand{
     font-family:'Oswald',sans-serif;
     font-weight:600;
@@ -10378,7 +10397,10 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
 <body>
 <div class="wrap">
   <header>
-    <div class="brand">NUMERA<span>CERTO</span></div>
+    <div class="header-top">
+      <button class="back-btn" id="backBtn" style="display:none;" aria-label="Voltar">←</button>
+      <div class="brand">NUMERA<span>CERTO</span></div>
+    </div>
     <div class="stats" id="stats" style="display:none;">
       <div>Paradas: <b id="statTotal">0</b></div>
       <div class="warn">A conferir: <b id="statWarn">0</b></div>
@@ -10446,6 +10468,7 @@ const listEl = document.getElementById('list');
 const statsEl = document.getElementById('stats');
 const resetBar = document.getElementById('resetBar');
 const scanFab = document.getElementById('scanFab');
+const backBtn = document.getElementById('backBtn');
 let stops = [];
 
 chooseBtn.addEventListener('click', function(){
@@ -10473,28 +10496,35 @@ fileInput.addEventListener('change', async (e) => {
       statusEl.classList.add('err');
       statusEl.textContent = 'Não consegui encontrar paradas nesse PDF. Confirme que é o PDF exportado do Circuit.';
       resetBar.style.display = 'block';
+      backBtn.style.display = 'flex';
       return;
     }
     statusEl.classList.remove('show');
     render();
     scanFab.classList.add('show');
+    backBtn.style.display = 'flex';
   } catch (err) {
     statusEl.classList.add('err');
     statusEl.textContent = 'Não consegui ler esse arquivo. Tente exportar o PDF novamente pelo Circuit.\n(' + err.message + ')';
     resetBar.style.display = 'block';
+    backBtn.style.display = 'flex';
   }
 });
 
-document.getElementById('resetBtn').addEventListener('click', () => {
+function resetApp() {
   stops = [];
   fileInput.value = '';
   listEl.innerHTML = '';
   statsEl.style.display = 'none';
   resetBar.style.display = 'none';
   scanFab.classList.remove('show');
+  backBtn.style.display = 'none';
   statusEl.classList.remove('show','err');
   uploadZone.style.display = 'block';
-});
+}
+
+document.getElementById('resetBtn').addEventListener('click', resetApp);
+backBtn.addEventListener('click', resetApp);
 
 async function extractText(arrayBuffer) {
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
