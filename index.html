@@ -10143,7 +10143,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     position:sticky; top:0; z-index:10;
     background:var(--bg);
     border-bottom:1px solid var(--line);
-    padding:18px 0 14px;
+    padding:calc(18px + env(safe-area-inset-top, 0px)) 0 14px;
   }
   .header-top{
     display:flex;
@@ -10276,6 +10276,10 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     color:var(--coral);
     white-space:nowrap;
   }
+  .chip.group-chip{
+    background:var(--amber-dim);
+    color:var(--amber);
+  }
   .check{
     width:24px; height:24px;
     border-radius:50%;
@@ -10380,6 +10384,13 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     font-size:14.5px;
     color:var(--text);
   }
+  .scan-result-group{
+    margin-top:8px;
+    font-size:13px;
+    color:var(--amber);
+    font-weight:600;
+    line-height:1.4;
+  }
   .overlay-footer{
     padding:14px; text-align:center;
     background:#0a0c0f;
@@ -10438,6 +10449,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     <div class="scan-result-label" id="scanResultLabel">Aponte para o QR code da etiqueta</div>
     <div class="scan-result-num" id="scanResultNum">--</div>
     <div class="scan-result-addr" id="scanResultAddr"></div>
+    <div class="scan-result-group" id="scanResultGroup"></div>
   </div>
   <div class="overlay-footer">
     <button id="cancelScanBtn">Fechar leitura</button>
@@ -10570,7 +10582,46 @@ function parseStops(text) {
     }
     i += 1;
   }
+  addGroupInfo(found);
   return found;
+}
+
+function normalizeAddressText(addr) {
+  let s = addr.toLowerCase();
+  s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); // remove acentos
+  s = s.replace(/\bav\.?\b/g, 'avenida');
+  s = s.replace(/\br\.?\b/g, 'rua');
+  s = s.replace(/\bvla\.?\b/g, 'viela');
+  s = s.replace(/\btv\.?\b/g, 'travessa');
+  s = s.replace(/\bal\.?\b/g, 'alameda');
+  s = s.replace(/\bpca\.?\b/g, 'praca');
+  const parts = s.split(',').map(p => p.trim()).filter(Boolean);
+  let streetPart = (parts[0] || '').replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+  let numberPart = parts[1] || '';
+  const numMatch = numberPart.match(/\d+/);
+  const numClean = numMatch ? numMatch[0] : numberPart.replace(/[^a-z0-9]/g, '');
+  return streetPart + '#' + numClean;
+}
+
+function groupKey(stop) {
+  if (stop.lat !== 0 || stop.lon !== 0) {
+    return 'geo:' + stop.lat.toFixed(5) + ',' + stop.lon.toFixed(5);
+  }
+  return 'txt:' + normalizeAddressText(stop.endereco);
+}
+
+function addGroupInfo(list) {
+  const groups = {};
+  list.forEach(s => {
+    const key = groupKey(s);
+    (groups[key] = groups[key] || []).push(s);
+  });
+  Object.values(groups).forEach(g => {
+    if (g.length > 1) {
+      const nums = g.map(s => s.numero).sort((a, b) => a - b);
+      g.forEach(s => { s.grupoTotal = g.length; s.grupoSequencia = nums; });
+    }
+  });
 }
 
 function render() {
@@ -10591,6 +10642,7 @@ function render() {
 function rowHtml(s) {
   const idx = s.numero - 1;
   const chip = s.precisaConferir ? '<span class="chip">Conferir endereço</span>' : '';
+  const groupChip = s.grupoTotal ? '<span class="chip group-chip">' + s.grupoTotal + ' pacotes nesse endereço</span>' : '';
   return `
     <div class="row" data-idx="${idx}" id="row-${idx}">
       <div class="num">${String(s.numero).padStart(2, '0')}</div>
@@ -10599,6 +10651,7 @@ function rowHtml(s) {
         <div class="meta">
           <span class="code">${escapeHtml(s.codigo)}</span>
           ${chip}
+          ${groupChip}
         </div>
       </div>
       <div class="check"></div>
@@ -10703,20 +10756,29 @@ function resetResultPanel() {
   document.getElementById('scanResultAddr').textContent = '';
 }
 
-function tick() {
+const SCAN_MAX_DIM = 480; // analisar em resolução menor = muito mais leve
+const SCAN_INTERVAL_MS = 180; // não precisa analisar a cada quadro do vídeo
+let lastTickTime = 0;
+
+function tick(now) {
   if (!scanning) return;
+  requestAnimationFrame(tick);
+  if (now - lastTickTime < SCAN_INTERVAL_MS) return;
+  lastTickTime = now;
   const v = document.getElementById('video');
-  if (v && v.readyState === v.HAVE_ENOUGH_DATA) {
-    canvas.width = v.videoWidth;
-    canvas.height = v.videoHeight;
-    ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  if (v && v.readyState === v.HAVE_ENOUGH_DATA && v.videoWidth) {
+    const scale = Math.min(1, SCAN_MAX_DIM / Math.max(v.videoWidth, v.videoHeight));
+    const w = Math.round(v.videoWidth * scale);
+    const h = Math.round(v.videoHeight * scale);
+    if (canvas.width !== w) canvas.width = w;
+    if (canvas.height !== h) canvas.height = h;
+    ctx.drawImage(v, 0, 0, w, h);
+    const imageData = ctx.getImageData(0, 0, w, h);
     const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
     if (code && code.data) {
       handleScan(code.data.trim());
     }
   }
-  requestAnimationFrame(tick);
 }
 
 function handleScan(text) {
@@ -10727,17 +10789,20 @@ function handleScan(text) {
   const labelEl = document.getElementById('scanResultLabel');
   const numEl = document.getElementById('scanResultNum');
   const addrEl = document.getElementById('scanResultAddr');
+  const groupEl = document.getElementById('scanResultGroup');
   if (match && scannedSet.has(match.codigo)) {
     panel.classList.add('notfound');
     labelEl.textContent = 'Pacote já foi bipado';
     numEl.textContent = String(match.numero).padStart(2, '0');
     addrEl.textContent = match.endereco;
+    groupEl.textContent = groupInfoText(match);
     playErrorSound();
   } else if (match) {
     panel.classList.remove('notfound');
     labelEl.textContent = 'Pacote número';
     numEl.textContent = String(match.numero).padStart(2, '0');
     addrEl.textContent = match.endereco;
+    groupEl.textContent = groupInfoText(match);
     scannedSet.add(match.codigo);
     updateCounter();
     updateStats();
@@ -10748,8 +10813,14 @@ function handleScan(text) {
     labelEl.textContent = 'Pacote não encontrado';
     numEl.textContent = '?';
     addrEl.textContent = text;
+    groupEl.textContent = '';
     playErrorSound();
   }
+}
+
+function groupInfoText(stop) {
+  if (!stop.grupoTotal) return '';
+  return stop.grupoTotal + ' pacotes nesse endereço — sequência: ' + stop.grupoSequencia.map(n => String(n).padStart(2, '0')).join(', ');
 }
 
 function highlightRow(idx) {
