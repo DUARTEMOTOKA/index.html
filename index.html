@@ -10613,6 +10613,39 @@ function escapeHtml(str) {
   return d.innerHTML;
 }
 
+/* ---------------- Sons ---------------- */
+let audioCtx = null;
+function getAudioCtx() {
+  if (!audioCtx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    audioCtx = new AC();
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+function beep(freq, durationMs, type) {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = type || 'sine';
+  osc.frequency.value = freq;
+  gain.gain.value = 0.28;
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  const now = ctx.currentTime;
+  osc.start(now);
+  osc.stop(now + durationMs / 1000);
+}
+function playSuccessSound() {
+  beep(1800, 110, 'sine');
+}
+function playErrorSound() {
+  beep(320, 150, 'square');
+  setTimeout(() => beep(220, 200, 'square'), 160);
+}
+
 /* ---------------- Leitor de QR code ---------------- */
 const scanOverlay = document.getElementById('scanOverlay');
 const camWrap = document.getElementById('camWrap');
@@ -10632,6 +10665,7 @@ function updateCounter() {
 }
 
 async function openScanner() {
+  getAudioCtx();
   scanOverlay.classList.add('show');
   lastCode = null;
   camWrap.innerHTML = '<video id="video" playsinline muted autoplay></video><div class="frame"></div><div class="scan-counter" id="scanCounter">' + scannedSet.size + '/' + stops.length + ' bipados</div>';
@@ -10689,7 +10723,13 @@ function handleScan(text) {
   const labelEl = document.getElementById('scanResultLabel');
   const numEl = document.getElementById('scanResultNum');
   const addrEl = document.getElementById('scanResultAddr');
-  if (match) {
+  if (match && scannedSet.has(match.codigo)) {
+    panel.classList.add('notfound');
+    labelEl.textContent = 'Pacote já foi bipado';
+    numEl.textContent = String(match.numero).padStart(2, '0');
+    addrEl.textContent = match.endereco;
+    playErrorSound();
+  } else if (match) {
     panel.classList.remove('notfound');
     labelEl.textContent = 'Pacote número';
     numEl.textContent = String(match.numero).padStart(2, '0');
@@ -10698,11 +10738,13 @@ function handleScan(text) {
     updateCounter();
     updateStats();
     highlightRow(match.numero - 1);
+    playSuccessSound();
   } else {
     panel.classList.add('notfound');
-    labelEl.textContent = 'Código lido (não encontrado na rota)';
+    labelEl.textContent = 'Pacote não encontrado';
     numEl.textContent = '?';
     addrEl.textContent = text;
+    playErrorSound();
   }
 }
 
